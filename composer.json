@@ -12,5 +12,14 @@
             "email": "joshwaihi@gmail.com"
         }
     ],
-    "minimum-stability": "dev"
+    "minimum-stability": "dev",
+    "require-dev": {
+      "acquia/coding-standards": "^0.2.0",
+      "dealerdirect/phpcodesniffer-composer-installer": "^0.4.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Drutiny\\Plugin\\Domo\\": "src/",
+        }
+    }
 }
