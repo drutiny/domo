@@ -19,7 +19,7 @@
     },
     "autoload": {
         "psr-4": {
-            "Drutiny\\Plugin\\Domo\\": "src/",
+            "Drutiny\\Plugin\\Domo\\": "src/"
         }
     }
 }
