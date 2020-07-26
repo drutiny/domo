@@ -1,0 +1,16 @@
+{
+    "name": "drutiny/domo",
+    "description": "Domo plugin for drutiny",
+    "type": "library",
+    "require": {
+        "drutiny/drutiny": "^3.0-dev"
+    },
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Josh Waihi",
+            "email": "joshwaihi@gmail.com"
+        }
+    ],
+    "minimum-stability": "dev"
+}
