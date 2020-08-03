@@ -1,3 +1,6 @@
+parameters:
+  domo.api.base_uri: https://api.domo.com/
+
 services:
     _defaults:
         autowire: true      # Automatically injects dependencies in your services.
@@ -6,3 +9,9 @@ services:
 
     Drutiny\Plugin\Domo\Audit\:
         resource: 'src/Audit/*'
+
+    Drutiny\Plugin\Domo\Plugin\DomoPlugin:
+      tags: [plugin]
+
+    domo.api:
+      class: 'Drutiny\Plugin\Domo\Api'
