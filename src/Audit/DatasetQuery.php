@@ -38,6 +38,6 @@ class DatasetQuery extends AbstractAnalysis {
         $sql = str_replace("\n", " ", $sql);
 
         $rows = $api->queryDatasetKeyed($dataset['id'], $sql);
-        $this->set('tickets', $rows);
+        $this->set('rows', $rows);
     }
 }

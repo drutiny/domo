@@ -15,3 +15,8 @@ services:
 
     domo.api:
       class: 'Drutiny\Plugin\Domo\Api'
+
+    Drutiny\Plugin\Domo\Api:
+
+    Drutiny\Plugin\Domo\DomoDatasetFormat:
+      tags: [format]
