@@ -8,6 +8,7 @@ use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\Console\Helper\ProgressBar;
+use Psr\Http\Message\MessageInterface;
 use League\Csv\Writer;
 
 
@@ -41,6 +42,9 @@ class Api {
       ]);
   }
 
+  /**
+   * Get the OAuth token for API requests
+   */
   protected function getToken() {
     return $this->cache->get('domo.api.oauth_token', function (ItemInterface $item) {
       $this->progress->setMessage("Retriving Domo OAuth Token");
@@ -57,63 +61,75 @@ class Api {
     });
   }
 
+  /**
+   * Wrapper for the API client.
+   */
+  protected function call(string $method, string $path, array $parameters = []):MessageInterface
+  {
+    try {
+      $token = $this->getToken();
+      $parameters['headers']['Authorization'] = 'Bearer ' . $token['access_token'];
+      $this->progress->setMessage("Making call to $method $path...");
+      return $this->client->request($method, $path, $parameters);
+    }
+    catch (\GuzzleHttp\Exception\ClientException $e) {
+      $response = $e->getResponse();
+      $json = json_decode($response->getBody(), true);
+
+      // Detect expired tokens and reattempt.
+      if (isset($json['error']) && $json['error'] == 'invalid_token') {
+        $this->cache->delete('domo.api.oauth_token');
+        return $this->call($method, $path, $parameters);
+      }
+
+      throw $e;
+    }
+    throw new \Exception("Unexpected outcome to API call attempt to Domo.");
+  }
+
+  /**
+   * Flush cache.
+   */
   public function flushCache()
   {
     $this->cache->delete('domo.api.datasets');
     return $this;
   }
 
+  /**
+   * Get a list of datasets. This can take a while...
+   */
   public function getDatasets()
   {
-      try {
-          return $this->cache->get('domo.api.datasets', function (ItemInterface $item) {
-            $datasets = [];
-            $token = $this->getToken();
+        return $this->cache->get('domo.api.datasets', function (ItemInterface $item) {
+          $datasets = [];
 
-            $offset=0;
-            $limit = 50;
-            $this->progress->setMessage("Retriving Domo Datasets");
-            do {
-              $response = $this->client->get('/v1/datasets', [
-                'headers' => [
-                  'Authorization' => 'Bearer ' . $token['access_token'],
-                ],
-                'query' => [
-                  'offset' => $offset,
-                  'limit' => $limit,
-                ]
-              ]);
-              $data = json_decode($response->getBody(), true);
+          $offset=0;
+          $limit = 50;
 
-              foreach ($data as $dataset) {
-                $datasets[$dataset['name']] = $dataset;
-              }
-              $offset = count($datasets);
+          do {
+            $response = $this->call('GET', '/v1/datasets', ['query' => [
+                'offset' => $offset,
+                'limit' => $limit,
+              ]]);
+            $data = json_decode($response->getBody(), true);
+
+            foreach ($data as $dataset) {
+              $datasets[$dataset['name']] = $dataset;
             }
-            while (count($data) == $limit);
+            $offset = count($datasets);
+          }
+          while (count($data) == $limit);
 
-            return $datasets;
-        });
-      }
-      catch (\GuzzleHttp\Exception\ClientException $e) {
-          $response = $e->getResponse();
-          $json = json_decode($response->getBody(), true);
-          print_r($json);
-          throw $e;
-      }
+          return $datasets;
+      });
   }
 
   public function getDataset($dataset_id)
   {
     $cid = 'domo.dataset.'.$dataset_id;
     return $this->cache->get($cid, function  (ItemInterface $item) use ($dataset_id) {
-
-      $token = $this->getToken();
-      $response = $this->client->request('GET', '/v1/datasets/'.$dataset_id, [
-        'headers' => [
-          'Authorization' => 'Bearer ' . $token['access_token'],
-        ]
-      ]);
+      $response = $this->call('GET', '/v1/datasets/'.$dataset_id);
       return json_decode($response->getBody(), true);
     });
   }
@@ -122,12 +138,7 @@ class Api {
   {
     $cid = 'domo.dataset.query.'.$dataset_id.hash('md5', $sql_query);
     $dataset = $this->cache->get($cid, function  (ItemInterface $item) use ($dataset_id, $sql_query) {
-      $this->progress->setMessage("Querying Domo Dataset $dataset_id");
-      $token = $this->getToken();
-      $response = $this->client->request('POST', '/v1/datasets/query/execute/'.$dataset_id, [
-        'headers' => [
-          'Authorization' => 'Bearer ' . $token['access_token'],
-        ],
+      $response = $this->call('POST', '/v1/datasets/query/execute/'.$dataset_id, [
         'json' => [
           'sql' => $sql_query
         ]
@@ -137,16 +148,14 @@ class Api {
     return $dataset['rows'];
   }
 
+  /**
+   * Dataset query with keyed result set.
+   */
   public function queryDatasetKeyed($dataset_id, $sql_query)
   {
     $cid = 'domo.dataset.query.'.$dataset_id.hash('md5', $sql_query);
     $dataset = $this->cache->get($cid, function  (ItemInterface $item) use ($dataset_id, $sql_query) {
-      $this->progress->setMessage("Querying Domo Dataset $dataset_id");
-      $token = $this->getToken();
-      $response = $this->client->request('POST', '/v1/datasets/query/execute/'.$dataset_id, [
-        'headers' => [
-          'Authorization' => 'Bearer ' . $token['access_token'],
-        ],
+      $response = $this->call('POST', '/v1/datasets/query/execute/'.$dataset_id, [
         'json' => [
           'sql' => $sql_query
         ]
@@ -162,14 +171,13 @@ class Api {
     return $rows;
   }
 
+  /**
+   * Create dataset.
+   */
   public function createDataset($name, $schema)
   {
-    $token = $this->getToken();
     $this->progress->setMessage("Creating dataset in Domo '$name'");
-    $response = $this->client->request('POST', '/v1/datasets', [
-      'headers' => [
-        'Authorization' => 'Bearer ' . $token['access_token'],
-      ],
+    $response = $this->call('POST', '/v1/datasets', [
       'json' => [
         'name' => $name,
         'description' => 'Drutiny table for '.$name,
@@ -185,13 +193,13 @@ class Api {
     return json_decode($response->getBody(), true);
   }
 
+  /**
+   * Append dataset.
+   */
   public function appendDataset($dataset_id, Writer $writer)
   {
-    $token = $this->getToken();
-    $this->progress->setMessage("Writting data to Domo Dataset $dataset_id");
-    $response = $this->client->request('PUT', '/v1/datasets/'.$dataset_id.'/data', [
+    $response = $this->call('PUT', '/v1/datasets/'.$dataset_id.'/data', [
       'headers' => [
-        'Authorization' => 'Bearer ' . $token['access_token'],
         'Content-Type' =>  'text/csv',
       ],
       'query' => ['updateMethod' => 'APPEND'],
