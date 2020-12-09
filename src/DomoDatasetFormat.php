@@ -33,14 +33,41 @@ class DomoDatasetFormat extends Format
 
     public function render(Profile $profile, AssessmentInterface $assessment):FormatInterface
     {
-        $uuid = $this->uuid();
 
+        $uuid = $this->uuid();
+        $date = date('c', REQUEST_TIME);
         $datasets = [];
+
+        $target = $this->container->get('target');
+        $target_class = str_replace('\\', '', get_class($target));
+
+
+        // Remove aht.app_data.field_derived_key_salt
+        $datasets['Drutiny_Target_'.$target_class.'_Data'] = [
+          'assessment_uuid' => ['type' => 'STRING', 'name' => 'uuid', 'value' => $uuid],
+          'target' => ['type' => 'STRING', 'name' => 'target', 'value' => $target->getId()],
+          'date' => ['type' => 'DATETIME', 'name' => 'date', 'value' => $date],
+        ];
+
+        foreach ($target->getPropertyList() as $property_name) {
+          $data = $target[$property_name];
+          if (is_object($data)) {
+            continue;
+          }
+          if (is_array($data) && isset($data['field_derived_key_salt'])) {
+            unset($data['field_derived_key_salt']);
+          }
+          $datasets['Drutiny_Target_'.$target_class.'_Data'][$property_name] = [
+            'type' => 'STRING',
+            'name' => $property_name,
+            'value' => json_encode($data),
+          ];
+        }
+
         $datasets['Drutiny_assessment_results'] = [
-          'uuid' => ['type' => 'STRING', 'name' => 'uuid', 'value' => $uuid],
-          'profile' => ['type' => 'STRING', 'name' => 'profile', 'value' => $this->container->get('target')['drush.alias']],
-          'target' => ['type' => 'STRING', 'name' => 'target', 'value' => $profile->name],
-          'created' => ['type' => 'DATETIME', 'name' => 'created', 'value' => date('c', REQUEST_TIME)],
+          'assessment_uuid' => ['type' => 'STRING', 'name' => 'assessment_uuid', 'value' => $uuid],
+          'profile' => ['type' => 'STRING', 'name' => 'profile', 'value' => $profile->name],
+          'target' => ['type' => 'STRING', 'name' => 'target', 'value' => $target->getId()],
           'start' => ['type' => 'DATETIME', 'name' => 'reporting_period_start', 'value' => $profile->getReportingPeriodStart()->format('c')],
           'end' => ['type' => 'DATETIME', 'name' => 'reporting_period_end',   'value' => $profile->getReportingPeriodEnd()->format('c')],
           'policy_name' => ['type' => 'STRING', 'name' => 'policy_name'],
@@ -49,9 +76,14 @@ class DomoDatasetFormat extends Format
           'type' => ['type' => "STRING", 'name' => 'type'],
           'result_type' => ['type' => "STRING", 'name' => 'result_type'],
           'result_severity' => ['type' => "STRING", 'name' => 'result_severity'],
+          'date' => ['type' => 'DATETIME', 'name' => 'date', 'value' => $date],
         ];
 
         $rows = [];
+        $rows[] = [
+          'dataset' => 'Drutiny_Target_'.$target_class.'_Data',
+          'columns' =>   $datasets['Drutiny_Target_'.$target_class.'_Data'],
+        ];
 
         //$datasets = $this->client->getDatasets();
 
@@ -93,6 +125,7 @@ class DomoDatasetFormat extends Format
 
     public function write():iterable
     {
+        $logger = $this->container->get('logger');
         $this->client->flushCache();
         $datasets = $this->client->getDatasets();
 
@@ -104,10 +137,12 @@ class DomoDatasetFormat extends Format
             });
 
             if (empty($exists)) {
+                $logger->info("Creating new Dataset in Domo: $name.");
                 $response = $this->client->createDataset($name, array_values($schema));
             }
             else {
                 $response = reset($exists);
+                $logger->info("Found Domo dataset $name: {$response['id']}");
             }
             $this->content['datasets'][$name]['id'] = $response['id'];
         }
@@ -125,6 +160,7 @@ class DomoDatasetFormat extends Format
             $writer->insertAll($dataset['rows']);
             $writer->setNewline("\r\n");
             //RFC4180Field::addTo($writer);
+            $logger->info("Appending rows into $name ({$dataset['id']}).");
             $this->client->appendDataset($dataset['id'], $writer);
 
             $this->logger->info("Send " . count($dataset['rows']) . " to dataset '$name'.");
