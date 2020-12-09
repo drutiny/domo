@@ -36,89 +36,130 @@ class DomoDatasetFormat extends Format
 
         $uuid = $this->uuid();
         $date = date('c', REQUEST_TIME);
-        $datasets = [];
+        $schemas = [];
+        $insert = [];
 
         $target = $this->container->get('target');
         $target_class = str_replace('\\', '', get_class($target));
 
+        $schemas['Drutiny_Target_'.$target_class.'_Data'] = [
+          'assessment_uuid' => [
+            'type' => 'STRING', 'name' => 'assessment_uuid'
+          ],
+          'target' => [
+            'type' => 'STRING', 'name' => 'target'
+          ],
+          'date' => [
+            'type' => 'DATETIME', 'name' => 'date'
+          ],
+        ];
 
-        // Remove aht.app_data.field_derived_key_salt
-        $datasets['Drutiny_Target_'.$target_class.'_Data'] = [
-          'assessment_uuid' => ['type' => 'STRING', 'name' => 'uuid', 'value' => $uuid],
-          'target' => ['type' => 'STRING', 'name' => 'target', 'value' => $target->getId()],
-          'date' => ['type' => 'DATETIME', 'name' => 'date', 'value' => $date],
+        $insert['Drutiny_Target_'.$target_class.'_Data'][0] = [
+          'assessment_uuid' => $uuid,
+          'target' => $target->getId(),
+          'date' => $date,
         ];
 
         foreach ($target->getPropertyList() as $property_name) {
           $data = $target[$property_name];
+          // Can't store objects.
           if (is_object($data)) {
             continue;
           }
           if (is_array($data) && isset($data['field_derived_key_salt'])) {
             unset($data['field_derived_key_salt']);
           }
-          $datasets['Drutiny_Target_'.$target_class.'_Data'][$property_name] = [
-            'type' => 'STRING',
-            'name' => $property_name,
-            'value' => json_encode($data),
+          $schemas['Drutiny_Target_'.$target_class.'_Data'][$property_name] = [
+            'type' => 'STRING', 'name' => $property_name
           ];
+          $insert['Drutiny_Target_'.$target_class.'_Data'][0][$property_name] = json_encode($data);
         }
 
-        $datasets['Drutiny_assessment_results'] = [
-          'assessment_uuid' => ['type' => 'STRING', 'name' => 'assessment_uuid', 'value' => $uuid],
-          'profile' => ['type' => 'STRING', 'name' => 'profile', 'value' => $profile->name],
-          'target' => ['type' => 'STRING', 'name' => 'target', 'value' => $target->getId()],
-          'start' => ['type' => 'DATETIME', 'name' => 'reporting_period_start', 'value' => $profile->getReportingPeriodStart()->format('c')],
-          'end' => ['type' => 'DATETIME', 'name' => 'reporting_period_end',   'value' => $profile->getReportingPeriodEnd()->format('c')],
-          'policy_name' => ['type' => 'STRING', 'name' => 'policy_name'],
-          'policy_title' => ['type' => 'STRING', 'name' => 'policy_title'],
-          'language' => ['type' => "STRING", 'name' => 'language'],
-          'type' => ['type' => "STRING", 'name' => 'type'],
-          'result_type' => ['type' => "STRING", 'name' => 'result_type'],
-          'result_severity' => ['type' => "STRING", 'name' => 'result_severity'],
-          'date' => ['type' => 'DATETIME', 'name' => 'date', 'value' => $date],
+        $schemas['Drutiny_assessment_results'] = [
+          'assessment_uuid' => [
+            'type' => 'STRING', 'name' => 'assessment_uuid'
+          ],
+          'profile' => [
+            'type' => 'STRING', 'name' => 'profile'
+          ],
+          'target' => [
+            'type' => 'STRING', 'name' => 'target'
+          ],
+          'start' => [
+            'type' => 'DATETIME', 'name' => 'reporting_period_start'
+          ],
+          'end' => [
+            'type' => 'DATETIME', 'name' => 'reporting_period_end'
+          ],
+          'policy_name' => [
+            'type' => 'STRING', 'name' => 'policy_name'
+          ],
+          'policy_title' => [
+            'type' => 'STRING', 'name' => 'policy_title'
+          ],
+          'language' => [
+            'type' => "STRING", 'name' => 'language'
+          ],
+          'type' => [
+            'type' => "STRING", 'name' => 'type'
+          ],
+          'result_type' => [
+            'type' => "STRING", 'name' => 'result_type'
+          ],
+          'result_severity' => [
+            'type' => "STRING", 'name' => 'result_severity'
+          ],
+          'date' => [
+            'type' => 'DATETIME', 'name' => 'date'
+          ],
         ];
 
-        $rows = [];
-        $rows[] = [
-          'dataset' => 'Drutiny_Target_'.$target_class.'_Data',
-          'columns' =>   $datasets['Drutiny_Target_'.$target_class.'_Data'],
+        $defaults = [
+          'assessment_uuid' => $uuid,
+          'profile' => $profile->name,
+          'target' => $target->getId(),
+          'start' => $profile->getReportingPeriodStart()->format('c'),
+          'end' => $profile->getReportingPeriodEnd()->format('c'),
+          'policy_name' => NULL,
+          'policy_title' => NULL,
+          'language' => NULL,
+          'type' => NULL,
+          'result_type' => NULL,
+          'result_severity' => NULL,
+          'date' => $date,
         ];
-
-        //$datasets = $this->client->getDatasets();
 
         foreach ($assessment->getResults() as $response) {
           $policy = $response->getPolicy();
+          $dataset_name = $this->getPolicyDatasetName($policy);
+          $insert_row = [];
 
-          $row = [
-            'dataset' => 'Drutiny_assessment_results',
-            'columns' => $datasets['Drutiny_assessment_results']
-          ];
-          $row['columns']['policy_name']['value'] = $policy->name;
-          $row['columns']['policy_title']['value'] = $policy->title;
-          $row['columns']['language']['value'] = $policy->language;
-          $row['columns']['type']['value'] = $policy->type;
-          $row['columns']['result_type']['value'] = $response->getType();
-          $row['columns']['result_severity']['value'] = $response->getSeverity();
-          $rows[] = $row;
+          $dataset_columns = $this->getPolicyDatasetColumns($policy, $response);
+          $dataset_columns[0]['value'] = $uuid;
+          foreach ($dataset_columns as $column) {
+              $column_name = $column['name'];
+              $schemas[$dataset_name][$column_name] = [
+                'name' => $column_name,
+                'type' => $column['type'],
+              ];
 
-          $data = $this->getPolicyDatasetColumns($policy, $response);
-          $data[0]['value'] = $uuid;
+              $insert_row[$column_name] = $column['value'];
+          }
+          $insert[$dataset_name][] = $insert_row;
 
-          $datasets[$this->getPolicyDatasetName($policy)] = array_map(function ($r) {
-              if(isset($r['value'])) unset($r['value']);
-              return $r;
-          }, $data);
-
-          $rows[] = [
-            'dataset' => $this->getPolicyDatasetName($policy),
-            'columns' => $data,
-          ];
+          $assessment_row = $defaults;
+          $assessment_row['policy_name'] = $policy->name;
+          $assessment_row['policy_title'] = $policy->title;
+          $assessment_row['language'] = $policy->language;
+          $assessment_row['type'] = $policy->type;
+          $assessment_row['result_type'] = $response->getType();
+          $assessment_row['result_severity'] = $response->getSeverity();
+          $insert['Drutiny_assessment_results'][] = $assessment_row;
         }
 
         $this->content = [
-          'datasets' => $datasets,
-          'rows' => $rows,
+          'schemas' => $schemas,
+          'insert' => $insert,
         ];
         return $this;
     }
@@ -127,47 +168,51 @@ class DomoDatasetFormat extends Format
     {
         $logger = $this->container->get('logger');
         $this->client->flushCache();
-        $datasets = $this->client->getDatasets();
-
-        // Ensure all datasets are present and obtain their dataset id.
-        foreach ($this->content['datasets'] as $name => $schema) {
-            // Find the dataset if it exists.
-            $exists = array_filter($datasets, function ($row) use ($name) {
-                return $row['name'] == $name;
-            });
-
-            if (empty($exists)) {
-                $logger->info("Creating new Dataset in Domo: $name.");
-                $response = $this->client->createDataset($name, array_values($schema));
-            }
-            else {
-                $response = reset($exists);
-                $logger->info("Found Domo dataset $name: {$response['id']}");
-            }
-            $this->content['datasets'][$name]['id'] = $response['id'];
+        $existing_datasets = [];
+        foreach ($this->client->getDatasets() as $dataset) {
+          $existing_datasets[$dataset['name']] = $dataset['id'];
         }
-        $this->client->flushCache();
 
-        // Sort into datasets.
-        foreach ($this->content['rows'] as $row) {
-            $this->content['datasets'][$row['dataset']]['rows'][] = array_column($row['columns'], 'value');
+        foreach ($this->content['schemas'] as $dataset => $schema) {
+            if (!isset($existing_datasets[$dataset])) {
+              $logger->info("Creating new Dataset in Domo: $dataset.");
+              $response = $this->client->createDataset($dataset, array_values($schema));
+              $existing_datasets[$dataset] = $response['id'];
+            }
+            // Reset the schema to what is available in Domo already.
+            else {
+              $logger->info("Found Domo dataset $dataset: {$existing_datasets[$dataset]}");
+              $info = $this->client->getDataset($existing_datasets[$dataset]);
+              $this->content['schemas'][$dataset] = $info['schema']['columns'];
+            }
         }
 
         // Append new rows.
-        foreach ($this->content['datasets'] as $name => $dataset) {
+        foreach ($this->content['insert'] as $dataset_name => $rows) {
+            $schema = $this->content['schemas'][$dataset_name];
+            $id = $existing_datasets[$dataset_name];
+            // Ensure the cell order matches the schema.
+            $data = [];
+            foreach ($rows as $row) {
+              $dataset_row = [];
+              foreach ($schema as $column) {
+                $dataset_row[] = $row[$column['name']] ?? NULL;
+              }
+              $data[] = $dataset_row;
+            }
             $writer = Writer::createFromString();
             $writer->setEscape('');
-            $writer->insertAll($dataset['rows']);
+            $writer->insertAll($data);
             $writer->setNewline("\r\n");
             //RFC4180Field::addTo($writer);
-            $logger->info("Appending rows into $name ({$dataset['id']}).");
-            $this->client->appendDataset($dataset['id'], $writer);
+            $logger->info("Appending rows into $dataset_name ($id).");
+            $this->client->appendDataset($id, $writer);
 
-            $this->logger->info("Send " . count($dataset['rows']) . " to dataset '$name'.");
-            $this->logger->debug('======='.$name.'=======');
+            $this->logger->info("Send " . count($data) . " to dataset '$dataset_name'.");
+            $this->logger->debug('======='.$dataset_name.'=======');
             $this->logger->debug($writer->getContent());
 
-            yield $dataset['id'];
+            yield $dataset_name;
         }
     }
 
@@ -181,7 +226,7 @@ class DomoDatasetFormat extends Format
     public function getPolicyDatasetColumns(Policy $policy, AuditResponse $response)
     {
         $columns = [
-          ['type' => 'STRING', 'name' => 'uuid'],
+          ['type' => 'STRING', 'name' => 'assessment_uuid'],
           ['type' => "STRING", 'name' => 'target',   'value' => $this->container->get('target')['drush.alias']],
           ['type' => "STRING", 'name' => 'title',    'value' => $policy->title],
           ['type' => "STRING", 'name' => 'name',     'value' => $policy->name],

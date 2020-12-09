@@ -103,6 +103,21 @@ class Api {
       }
   }
 
+  public function getDataset($dataset_id)
+  {
+    $cid = 'domo.dataset.'.$dataset_id;
+    return $this->cache->get($cid, function  (ItemInterface $item) use ($dataset_id) {
+
+      $token = $this->getToken();
+      $response = $this->client->request('GET', '/v1/datasets/'.$dataset_id, [
+        'headers' => [
+          'Authorization' => 'Bearer ' . $token['access_token'],
+        ]
+      ]);
+      return json_decode($response->getBody(), true);
+    });
+  }
+
   public function queryDataset($dataset_id, $sql_query)
   {
     $cid = 'domo.dataset.query.'.$dataset_id.hash('md5', $sql_query);
