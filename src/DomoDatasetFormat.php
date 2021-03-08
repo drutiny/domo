@@ -17,6 +17,7 @@ use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Twig\Environment;
+use GuzzleHttp\Exception\ClientException;
 
 class DomoDatasetFormat extends Format
 {
@@ -206,9 +207,15 @@ class DomoDatasetFormat extends Format
             $writer->setNewline("\r\n");
             //RFC4180Field::addTo($writer);
             $logger->info("Appending rows into $dataset_name ($id).");
-            $this->client->appendDataset($id, $writer);
+            try {
+              $this->client->appendDataset($id, $writer);
+              $this->logger->info("Sent " . count($data) . " rows to dataset '$dataset_name'.");
+            }
+            catch (ClientException $e) {
+              $this->logger->error("Failed to sent data to $dataset_name: " . $e->getMessage());
+              continue;
+            }
 
-            $this->logger->info("Send " . count($data) . " to dataset '$dataset_name'.");
             $this->logger->debug('======='.$dataset_name.'=======');
             $this->logger->debug($writer->getContent());
 
