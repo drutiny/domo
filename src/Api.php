@@ -115,7 +115,7 @@ class Api {
             $data = json_decode($response->getBody(), true);
 
             foreach ($data as $dataset) {
-              $datasets[$dataset['name']] = $dataset;
+              $datasets[] = $dataset;
             }
             $offset = count($datasets);
           }
@@ -123,6 +123,14 @@ class Api {
 
           return $datasets;
       });
+  }
+
+  public function getDatasetByName($name)
+  {
+    foreach ($this->getDatasets() as $dataset) {
+      if ($dataset['name'] == $name) return $this->getDataset($dataset['id']);
+    }
+    throw new \Exception("No such dataset found: $name.");
   }
 
   public function getDataset($dataset_id)
@@ -174,7 +182,7 @@ class Api {
   /**
    * Create dataset.
    */
-  public function createDataset($name, $schema)
+  public function createDataset(string $name, array $columns)
   {
     $this->progress->setMessage("Creating dataset in Domo '$name'");
     $response = $this->call('POST', '/v1/datasets', [
@@ -183,13 +191,19 @@ class Api {
         'description' => 'Drutiny table for '.$name,
         'rows' => 0,
         'schema' => [
-          'columns' => array_map(function ($i) {
-            if (isset($i['value'])) unset($i['value']);
-            return $i;
-          }, $schema)
+          'columns' => $columns
         ],
       ]
     ]);
+    $this->flushCache();
+    return json_decode($response->getBody(), true);
+  }
+
+  public function deleteDataset($dataset_id)
+  {
+    $this->progress->setMessage("Deleting dataset in Domo '$dataset_id'");
+    $response = $this->call('DELETE', '/v1/datasets/'.$dataset_id);
+    $this->flushCache();
     return json_decode($response->getBody(), true);
   }
 

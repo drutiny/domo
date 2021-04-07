@@ -20,7 +20,9 @@ use League\Csv\Reader;
 use League\Csv\Statement;
 use League\Csv\RFC4180Field;
 use League\Csv\Writer;
+use League\Csv\ResultSet;
 use Drutiny\Plugin\Domo\Api;
+use GuzzleHttp\Exception\ClientException;
 
 /**
  *
@@ -74,54 +76,93 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
     protected function execute(InputInterface $input, OutputInterface $output)
     {
         $io = new SymfonyStyle($input, $output);
-        $finder = new Finder();
-        $finder->files()
-               ->in($input->getOption('report-dir'))
-               ->name('*.csv');
 
-        $this->datasets = [];
+        $datasets = [];
 
         $files = [];
-        foreach ($finder as $file) {
-          $dataset_name = $this->getDatasetName($file);
 
-          $reader = Reader::createFromFileObject($file->openFile('r'));
-          $reader->setHeaderOffset(0);
+        // Reporting directory may contain multiple files that belong to the
+        // same dataset so we read these files all into memory so we only
+        // send one upload call per dataset.
+        foreach ($this->findCsvFiles($input) as $file) {
+          $data = $this->readCsvData($file);
 
-          $records = Statement::create()->process($reader);
+          if (empty($data)) continue;
 
-          if (!isset($this->schemas[$dataset_name])) {
-            $this->schemas[$dataset_name] = $records->getHeader();
+          $name = $this->getDatasetName($file);
+          foreach ($data as $row) {
+            $datasets[$name][] = $row;
           }
-
-          foreach ($records as $record) {
-            $this->datasets[$dataset_name][] = $record;
-          }
-          $files[] = $file->getRealPath();
+          $files[$name][] = $file->getRealPath();
         }
 
-        if (empty($this->datasets)) {
+        // Mo files, mo problems.
+        if (empty($files)) {
           $io->success("No CSV files found. No upload required.");
           return 0;
         }
 
-        $progress = $this->getProgressBar(count($this->datasets));
-        $progress->start();
+        $progress = $this->getProgressBar();
+        $progress->start(count($datasets));
         $progress->setMessage("Sending CSV files to Domo...");
 
-        $this->syncDatasetSchemas();
+        // Upload datasets. If this fails, then remove the files from the
+        // $files array to prevent them from being deleted. This allows the
+        // data to be inspected and corrected so it can be uploaded.
+        $failure = 0;
+        foreach ($datasets as $name => $records) {
+          try {
+            $this->uploadDataset($name, $records);
+          }
+          catch (\Exception $e) {
+            $failure++;
+            $this->logger->error("Failed to send data to $name: " . $e->getMessage());
+            unset($files[$name]);
+          }
+          $this->getProgressBar()->advance();
+        }
 
         if ($input->getOption('remove-csv')) {
-          foreach ($files as $file) {
-            $this->logger->notice("Removing " . $file);
-            unlink($file);
+          foreach ($files as $dataset => $filenames) {
+            foreach ($filenames as $file) {
+              $this->logger->notice("Removing " . $file);
+              unlink($file);
+            }
           }
         }
 
         $progress->finish();
-        $io->success("Upload complete.");
+        $io->writeln("Upload complete.");
 
-        return 0;
+        return $failure;
+    }
+
+    protected function findCsvFiles(InputInterface $input):Finder
+    {
+      $finder = new Finder();
+      $finder->files()
+             ->in($input->getOption('report-dir'))
+             ->name('*.csv');
+      return $finder;
+    }
+
+    protected function readCsvData(\SplFileInfo $file):ResultSet
+    {
+      $reader = Reader::createFromFileObject($file->openFile('r'));
+      $reader->setHeaderOffset(0);
+
+      return Statement::create()->process($reader);
+    }
+
+    protected function buildSchemaFromData(array $data):array
+    {
+      $schema = [];
+
+      foreach (reset($data) as $k => $v) {
+        $schema[] = $this->prepareColumn($k, $v);
+      }
+
+      return $schema;
     }
 
     /**
@@ -129,82 +170,71 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
      */
     protected function getDatasetName(\SplFileInfo $file):string
     {
-      $name = $file->getFilename();
-      list($dataset_name, $target_metadata) = explode('__', $name);
-      return $dataset_name;
+      list($name, ) = explode('__', $file->getFilename(), 2);
+      return $name;
     }
 
-    protected function syncDatasetSchemas()
+    /**
+     * Upload data to Domo.
+     */
+    protected function uploadDataset(string $name, array $records):void
     {
-      foreach ($this->client->getDatasets() as $dataset) {
-        $this->domoDatasets[$dataset['name']] = $dataset['id'];
+      try {
+        $dataset = $this->client->getDatasetByName($name);
+        $method = 'retrieving';
       }
-      foreach ($this->datasets as $dataset_name => $rows) {
-          if (!isset($this->domoDatasets[$dataset_name])) {
-            $this->logger->notice("Creating new Dataset in Domo: $dataset_name.");
-            $this->domoSchemas[$dataset_name] = $this->buildDomoSchema($dataset_name);
-            $response = $this->client->createDataset($dataset_name, $this->domoSchemas[$dataset_name]);
-            $this->domoDatasets[$dataset_name] = $response['id'];
-          }
-          // Set the schema to what is available in Domo already.
-          else {
-            $this->logger->notice("Found Domo dataset $dataset_name: {$this->domoDatasets[$dataset_name]}");
-            $info = $this->client->getDataset($this->domoDatasets[$dataset_name]);
-            $this->domoSchemas[$dataset_name] = $info['schema']['columns'];
-            $this->domoDatasets[$dataset_name] = $info['id'];
-          }
-
-          $data = [];
-          foreach ($this->datasets[$dataset_name] as $row) {
-            $dataset_row = [];
-            foreach ($this->domoSchemas[$dataset_name] as $column) {
-              $dataset_row[] = $row[$column['name']] ?? NULL;
-            }
-            $data[] = $dataset_row;
-          }
-
-          $writer = Writer::createFromString();
-          $writer->setEscape('');
-          $writer->insertAll($data);
-          $writer->setNewline("\r\n");
-          //RFC4180Field::addTo($writer);
-          $this->logger->notice("Appending rows into $dataset_name.");
-          try {
-            $this->client->appendDataset($this->domoDatasets[$dataset_name], $writer);
-            $this->logger->notice("Sent " . count($data) . " rows to dataset '$dataset_name'.");
-          }
-          catch (ClientException $e) {
-            $this->logger->error("Failed to sent data to $dataset_name: " . $e->getMessage());
-            continue;
-          }
-          finally {
-            $this->getProgressBar()->advance();
-          }
+      catch (\Exception $e) {
+        $this->logger->warning($e->getMessage());
+        $dataset = $this->client->createDataset($name, $this->buildSchemaFromData($records));
+        $method = 'creating';
       }
 
+      $rows = [];
 
-    }
+      if (!isset($dataset['schema'])) {
+        $this->logger->error("Found dataset '$name' ({$dataset['id']}) with no schema while $method dataset. Deleting...");
+        $this->client->deleteDataset($dataset['id']);
+        throw new \Exception("Found dataset '$name' ({$dataset['id']}) with no schema while $method dataset.");
+      }
 
-    protected function buildDomoSchema(string $dataset_name):array
-    {
-      $schema = [];
-      $sample = $this->datasets[$dataset_name][0];
-      foreach ($this->schemas[$dataset_name] as $header) {
-        $schema[$header] = $this->prepareColumn($sample[$header]);
-        $schema[$header]['name'] = $header;
+      $headers = array_map(fn ($h) => $h['name'], $dataset['schema']['columns']);
 
-        switch ($header) {
-          case 'result_date':
-          case 'reporting_period_start':
-          case 'reporting_period_end':
-            $schema[$header]['type'] = 'DATETIME';
-            break;
+      foreach ($records as $r) {
+        $rows[] = array_map(fn ($h) => $r[$h] ?? NULL, $headers);
+
+        $missing_headers = array_diff(array_keys($r), $headers);
+        if (!empty($missing_headers)) {
+          $this->logger->warning("Dataset '$name' is missing schema columns for " . implode(', ', $missing_headers));
         }
       }
-      return $schema;
+
+      $writer = Writer::createFromString();
+      $writer->setEscape('');
+      $writer->insertAll($rows);
+      $writer->setNewline("\r\n");
+      //RFC4180Field::addTo($writer);
+
+      $this->logger->notice("Appending " . count($rows) . " rows into $name.");
+      $this->client->appendDataset($dataset['id'], $writer);
     }
 
-    protected function prepareColumn($value):array
+    protected function prepareColumn($name, $value):array
+    {
+      $column = $this->prepareColumnValue($value);
+      unset($column['value']);
+      $column['name'] = $name;
+
+      switch ($name) {
+        case 'result_date':
+        case 'reporting_period_start':
+        case 'reporting_period_end':
+          $column['type'] = 'DATETIME';
+          break;
+      }
+      return $column;
+    }
+
+    protected function prepareColumnValue($value):array
     {
       switch (gettype($value)) {
          case 'string':
