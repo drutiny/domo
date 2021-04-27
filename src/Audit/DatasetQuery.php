@@ -28,7 +28,18 @@ class DatasetQuery extends AbstractAnalysis {
     {
         $api = $this->container->get('domo.api');
         $datasets = $api->getDatasets();
-        $dataset = $datasets[$this->getParameter('dataset')];
+        $name = $this->getParameter('dataset');
+
+        foreach ($datasets as $set) {
+          if ($set['name'] == $name) {
+            $dataset = $set;
+            break;
+          }
+        }
+
+        if (!isset($dataset)) {
+          throw new \InvalidArgumentException("Cannot find dataset: ".$this->getParameter('dataset'));
+        }
 
         $sql = $this->interpolate($this->getParameter('query'), [
           'reportingPeriod.start' => $sandbox->getReportingPeriodStart()->format('c'),
