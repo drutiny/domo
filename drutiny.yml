@@ -15,6 +15,8 @@ services:
 
     Drutiny\Plugin\Domo\Command\DomoUploadCsvCommand:
       tags: [command]
+    Drutiny\Plugin\Domo\Command\DomoDatasetListCommand:
+      tags: [command]
 
     domo.api:
       class: 'Drutiny\Plugin\Domo\Api'
