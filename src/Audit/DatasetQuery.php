@@ -8,7 +8,7 @@ use Drutiny\Plugin\Domo\Api;
 
 class DatasetQuery extends AbstractAnalysis {
 
-    public function configure()
+    public function configure():void
     {
         $this->addParameter(
           'dataset',
