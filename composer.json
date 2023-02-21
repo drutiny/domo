@@ -3,7 +3,7 @@
     "description": "Domo plugin for drutiny",
     "type": "library",
     "require": {
-        "drutiny/drutiny": "^3.0-dev",
+        "drutiny/drutiny": "^3.6-dev",
         "league/csv": "^9.0"
     },
     "license": "GPL-3.0-or-later",
