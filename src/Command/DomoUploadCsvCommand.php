@@ -2,48 +2,38 @@
 
 namespace Drutiny\Plugin\Domo\Command;
 
-use Drutiny\Plugin;
-
-
-use Drutiny\Config\Config;
 use Drutiny\Plugin\Domo\Plugin\DomoPlugin;
-use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Drutiny\Console\Command\DrutinyBaseCommand;
-use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\Finder\Finder;
 use League\Csv\Reader;
 use League\Csv\Statement;
-use League\Csv\RFC4180Field;
 use League\Csv\Writer;
 use League\Csv\ResultSet;
 use Drutiny\Plugin\Domo\Api;
-use GuzzleHttp\Exception\ClientException;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Helper\ProgressBar;
 
 /**
  *
  */
 class DomoUploadCsvCommand extends DrutinyBaseCommand
 {
-    protected ContainerInterface $container;
-    protected DomoPlugin $plugin;
     protected array $datasets;
     protected array $schemas;
     protected array $domoDatasets;
     protected array $domoSchemas;
-    protected Api $client;
-    protected $logger;
 
-    public function __construct(ContainerInterface $container, DomoPlugin $plugin, Api $client)
+    public function __construct(
+      protected DomoPlugin $plugin, 
+      protected Api $client,
+      protected LoggerInterface $logger,
+      protected ProgressBar $progressBar
+    )
     {
-        $this->container = $container;
-        $this->plugin = $plugin;
-        $this->client = $client;
-        $this->logger = $container->get('logger');
         parent::__construct();
     }
 
@@ -102,9 +92,8 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
           return 0;
         }
 
-        $progress = $this->getProgressBar();
-        $progress->start(count($datasets));
-        $progress->setMessage("Sending CSV files to Domo...");
+        $this->progressBar->start(count($datasets));
+        $this->progressBar->setMessage("Sending CSV files to Domo...");
 
         // Upload datasets. If this fails, then remove the files from the
         // $files array to prevent them from being deleted. This allows the
@@ -119,7 +108,7 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
             $this->logger->error("Failed to send data to $name: " . $e->getMessage());
             unset($files[$name]);
           }
-          $this->getProgressBar()->advance();
+          $this->progressBar->advance();
         }
 
         if ($input->getOption('remove-csv')) {
@@ -131,7 +120,7 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
           }
         }
 
-        $progress->finish();
+        $this->progressBar->finish();
         $io->writeln("Upload complete.");
 
         return $failure;

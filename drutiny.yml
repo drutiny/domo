@@ -7,9 +7,6 @@ services:
         autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
         public: true
 
-    Drutiny\Plugin\Domo\Audit\:
-        resource: 'src/Audit/*'
-
     Drutiny\Plugin\Domo\Plugin\DomoPlugin:
       tags: [plugin]
 

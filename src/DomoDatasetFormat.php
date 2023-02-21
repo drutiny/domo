@@ -3,30 +3,25 @@
 namespace Drutiny\Plugin\Domo;
 
 use Drutiny\AssessmentInterface;
+use Drutiny\Attribute\AsFormat;
 use Drutiny\AuditResponse\AuditResponse;
 use Drutiny\Policy;
 use Drutiny\Profile;
 use Drutiny\Report\Format;
 use Drutiny\Report\FormatInterface;
-use Drutiny\Console\Verbosity;
-use League\Csv\RFC4180Field;
 use League\Csv\Writer;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Console\Exception\InvalidArgumentException;
-use Symfony\Component\Console\Output\BufferedOutput;
-use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
-use Twig\Environment;
 use GuzzleHttp\Exception\ClientException;
 
+#[AsFormat(name:'domo')]
 class DomoDatasetFormat extends Format
 {
-    protected string $name = 'domo';
     protected $content;
     protected $data;
     protected $client;
 
-    public function __construct(Api $domo, ContainerInterface $container, Environment $twig, LoggerInterface $logger)
+    public function __construct(Api $domo, ContainerInterface $container, LoggerInterface $logger)
     {
         $this->client = $domo;
         parent::__construct($container, $logger);
