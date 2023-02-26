@@ -7,9 +7,6 @@ services:
         autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
         public: true
 
-    Drutiny\Plugin\Domo\Plugin\DomoPlugin:
-      tags: [plugin]
-
     Drutiny\Plugin\Domo\Command\DomoUploadCsvCommand:
       tags: [command]
     Drutiny\Plugin\Domo\Command\DomoDatasetListCommand:

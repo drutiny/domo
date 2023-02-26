@@ -2,7 +2,6 @@
 
 namespace Drutiny\Plugin\Domo\Command;
 
-use Drutiny\Plugin\Domo\Plugin\DomoPlugin;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -28,7 +27,6 @@ class DomoUploadCsvCommand extends DrutinyBaseCommand
     protected array $domoSchemas;
 
     public function __construct(
-      protected DomoPlugin $plugin, 
       protected Api $client,
       protected LoggerInterface $logger,
       protected ProgressBar $progressBar

@@ -2,36 +2,46 @@
 
 namespace Drutiny\Plugin\Domo;
 
+use Drutiny\Attribute\Plugin;
+use Drutiny\Attribute\PluginField;
 use Drutiny\Http\Client;
-use Drutiny\Plugin\Domo\Plugin\DomoPlugin;
+use Drutiny\Plugin as DrutinyPlugin;
+use Drutiny\Plugin\FieldType;
+use Drutiny\Settings;
+use GuzzleHttp\ClientInterface;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
-use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Psr\Http\Message\MessageInterface;
 use League\Csv\Writer;
 
 
-/**
- * API client for CSKB.
- */
+#[Plugin(name: 'domo:api')]
+#[PluginField(
+  name: 'client_id',
+  description: "Your Domo OAuth Client ID:",
+  type: FieldType::CREDENTIAL
+)]
+#[PluginField(
+  name: 'secret',
+  description: 'Your Domo OAuth Secret:',
+  type: FieldType::CREDENTIAL
+)]
 class Api {
 
-  protected $client;
-  protected $cache;
-  protected $plugin;
-  protected $progress;
+  protected ClientInterface $client;
 
-  public function __construct(Client $client, CacheInterface $cache, ContainerInterface $container, DomoPlugin $plugin, ProgressBar $progress)
+  public function __construct(
+    Client $client, 
+    protected CacheInterface $cache, 
+    protected DrutinyPlugin $plugin, 
+    protected ProgressBar $progress,
+    Settings $settings)
   {
-      $this->progress = $progress;
-      $this->plugin = $plugin->load();
-      $this->cache = $cache;
       $this->client = $client->create([
-        'base_uri' => $container->getParameter('domo.api.base_uri'),
+        'base_uri' => $settings->get('domo.api.base_uri'),
         'headers' => [
           'User-Agent' => 'drutiny-cli/3.x',
-        //  'Accept' => 'application/vnd.api+json',
           'Accept-Encoding' => 'gzip',
         ],
         'decode_content' => 'gzip',
@@ -49,7 +59,7 @@ class Api {
     return $this->cache->get('domo.api.oauth_token', function (ItemInterface $item) {
       $this->progress->setMessage("Retriving Domo OAuth Token");
       $response = $this->client->get('/oauth/token', [
-        'auth' => [$this->plugin['client_id'], $this->plugin['secret']],
+        'auth' => [$this->plugin->client_id, $this->plugin->secret],
         'query' => [
           'grant_type' => 'client_credentials',
           'scope' => 'data',
