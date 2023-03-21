@@ -27,6 +27,11 @@ use League\Csv\Writer;
   description: 'Your Domo OAuth Secret:',
   type: FieldType::CREDENTIAL
 )]
+#[PluginField(
+  name: 'subdomain',
+  description: 'Your domo.com subdomain (e.g. <subdomain>.domo.com):',
+  type: FieldType::CONFIG
+)]
 class Api {
 
   protected ClientInterface $client;
@@ -150,6 +155,14 @@ class Api {
       $response = $this->call('GET', '/v1/datasets/'.$dataset_id);
       return json_decode($response->getBody(), true);
     });
+  }
+
+  public function getDatasetUrl(string $dataset_id):string
+  {
+    return strtr('https://<subdomain>.domo.com/datasources/$dataset_id/details/overview', [
+      '<subdomain>' => $this->plugin->subdomain,
+      '$dataset_id' => $dataset_id
+    ]);
   }
 
   public function queryDataset($dataset_id, $sql_query)
