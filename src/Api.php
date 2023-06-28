@@ -9,12 +9,13 @@ use Drutiny\Plugin as DrutinyPlugin;
 use Drutiny\Plugin\FieldType;
 use Drutiny\Settings;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Promise\PromiseInterface;
+use GuzzleHttp\RequestOptions;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Psr\Http\Message\MessageInterface;
 use League\Csv\Writer;
-
 
 #[Plugin(name: 'domo:api')]
 #[PluginField(
@@ -95,6 +96,32 @@ class Api {
       if (isset($json['error']) && $json['error'] == 'invalid_token') {
         $this->cache->delete('domo.api.oauth_token');
         return $this->call($method, $path, $parameters);
+      }
+
+      throw $e;
+    }
+    throw new \Exception("Unexpected outcome to API call attempt to Domo.");
+  }
+
+  /**
+   * Wrapper for the API client.
+   */
+  protected function callAsync(string $method, string $path, array $parameters = []):PromiseInterface
+  {
+    try {
+      $token = $this->getToken();
+      $parameters['headers']['Authorization'] = 'Bearer ' . $token['access_token'];
+      $this->progress->setMessage("Making call to $method $path...");
+      return $this->client->requestAsync($method, $path, $parameters);
+    }
+    catch (\GuzzleHttp\Exception\ClientException $e) {
+      $response = $e->getResponse();
+      $json = json_decode($response->getBody(), true);
+
+      // Detect expired tokens and reattempt.
+      if (isset($json['error']) && $json['error'] == 'invalid_token') {
+        $this->cache->delete('domo.api.oauth_token');
+        return $this->callAsync($method, $path, $parameters);
       }
 
       throw $e;
@@ -242,6 +269,70 @@ class Api {
       'query' => ['updateMethod' => 'APPEND'],
       'body' => $writer->getContent(),
     ]);
+    return json_decode($response->getBody(), true);
+  }
+
+  /**
+   * Create a new Dataset via Stream API.
+   */
+  public function createStream(Dataset $dataset, string $update_method = 'REPLACE'):array {
+    $response = $this->call('POST', '/v1/streams', [
+      RequestOptions::JSON => [
+        'dataSet' => $dataset->forJson(),
+        'updateMethod' => $update_method,
+      ],
+    ]);
+    return json_decode($response->getBody(), true);
+  }
+
+  /**
+   * Create a new Dataset via Stream API.
+   */
+  public function listStreams():iterable {
+    do {
+      $response = $this->call('GET', '/v1/streams', [
+        'query' => [
+          'limit' => $limit ??= 50,
+          'offset' => $offset ??= 0
+        ]
+      ]);
+      $results = json_decode($response->getBody(), true);
+
+      foreach ($results as $result) {
+        yield $result;
+      }
+      $offset += 50;
+    }
+    while (count($results) == $limit);
+  }
+
+  public function getStream(int $stream_id): array {
+    $response = $this->call('GET', '/v1/streams/' . $stream_id);
+    return json_decode($response->getBody(), true);
+  }
+
+  public function createStreamExecution(int $stream_id): array {
+    $response = $this->call('POST', '/v1/streams/' . $stream_id . '/executions');
+    return json_decode($response->getBody(), true);
+  }
+
+  public function uploadStreamExecutionPart(int $stream_id, int $execution_id, int $part_id, string $csv): PromiseInterface {
+    return $this->callAsync('PUT', '/v1/streams/' . $stream_id . '/executions/' . $execution_id . '/part/' . $part_id, [
+      'headers' => [
+        'Accept' => 'application/json',
+        'Content-Type' => 'text/csv',
+      ],
+      RequestOptions::BODY => $csv
+    ]);
+  }
+
+  public function commitStreamExecution(int $stream_id, int $execution_id):array {
+    $response = $this->call('PUT', "/v1/streams/{$stream_id}/executions/{$execution_id}/commit");
+    return json_decode($response->getBody(), true);
+  }
+
+  public function abortStreamExecution(int $stream_id, int $execution_id):array {
+    $response = $this->call('PUT', "/v1/streams/{$stream_id}/executions/{$execution_id}/abort");
     return json_decode($response->getBody(), true);
   }
 }
