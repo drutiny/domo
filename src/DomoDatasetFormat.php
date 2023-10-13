@@ -8,6 +8,7 @@ use Drutiny\Report\Format\CSV;
 use Fiasco\TabularOpenapi\Table;
 use League\Csv\Writer;
 use GuzzleHttp\Exception\ClientException;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 #[AsFormat(name:'domo')]
 #[UseService(Api::class, 'setDomoApi')]
@@ -21,7 +22,7 @@ class DomoDatasetFormat extends CSV
         $this->client = $domo;
     }
 
-    protected function writeTable(Table $table):string
+    protected function writeTable(Table $table):BufferedOutput
     {
         $dataset = 'Drutiny_' . $table->name;
         if (!isset($this->existingDatasets[$dataset])) {
@@ -62,7 +63,9 @@ class DomoDatasetFormat extends CSV
         catch (ClientException $e) {
           $this->logger->error("Failed to sent data to $dataset: " . $e->getMessage());
         }
-        return $table->name . ' to ' . $this->client->getDatasetUrl($this->existingDatasets[$dataset]);
+        $stream = new BufferedOutput();
+        $stream->write($writer->toString());
+        return $stream;
     }
 
     protected function buildDatasetSchemaFromRow(array $row):array {
